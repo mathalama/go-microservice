@@ -1,35 +1,36 @@
 package usecase
 
 import (
-	"errors"
+	"context"
 	"fmt"
 	"strings"
 
 	"doctor-service/internal/model"
-)
-
-var (
-	ErrDoctorNotFound = errors.New("doctor not found")
-	ErrEmailExists    = errors.New("doctor with this email already exists")
+	"github.com/google/uuid"
 )
 
 type DoctorRepository interface {
-	Create(doctor model.Doctor) (model.Doctor, error)
-	GetByID(id string) (model.Doctor, error)
-	List() ([]model.Doctor, error)
-	ExistsByEmail(email string) (bool, error)
-	NextID() string
+	Create(ctx context.Context, doctor model.Doctor) (model.Doctor, error)
+	GetByID(ctx context.Context, id string) (model.Doctor, error)
+	List(ctx context.Context) ([]model.Doctor, error)
+	ExistsByEmail(ctx context.Context, email string) (bool, error)
 }
 
-type DoctorUsecase struct {
+type DoctorUsecase interface {
+	CreateDoctor(ctx context.Context, fullName, specialization, email string) (model.Doctor, error)
+	GetDoctor(ctx context.Context, id string) (model.Doctor, error)
+	ListDoctors(ctx context.Context) ([]model.Doctor, error)
+}
+
+type doctorUsecase struct {
 	repo DoctorRepository
 }
 
-func NewDoctorUsecase(repo DoctorRepository) *DoctorUsecase {
-	return &DoctorUsecase{repo: repo}
+func NewDoctorUsecase(repo DoctorRepository) DoctorUsecase {
+	return &doctorUsecase{repo: repo}
 }
 
-func (u *DoctorUsecase) CreateDoctor(fullName, specialization, email string) (model.Doctor, error) {
+func (u *doctorUsecase) CreateDoctor(ctx context.Context, fullName, specialization, email string) (model.Doctor, error) {
 	fullName = strings.TrimSpace(fullName)
 	email = strings.TrimSpace(strings.ToLower(email))
 	specialization = strings.TrimSpace(specialization)
@@ -41,30 +42,30 @@ func (u *DoctorUsecase) CreateDoctor(fullName, specialization, email string) (mo
 		return model.Doctor{}, fmt.Errorf("email is required")
 	}
 
-	exists, err := u.repo.ExistsByEmail(email)
+	exists, err := u.repo.ExistsByEmail(ctx, email)
 	if err != nil {
 		return model.Doctor{}, err
 	}
 	if exists {
-		return model.Doctor{}, ErrEmailExists
+		return model.Doctor{}, model.ErrEmailExists
 	}
 
 	doctor := model.Doctor{
-		ID:             u.repo.NextID(),
+		ID:             uuid.New().String(),
 		FullName:       fullName,
 		Specialization: specialization,
 		Email:          email,
 	}
-	return u.repo.Create(doctor)
+	return u.repo.Create(ctx, doctor)
 }
 
-func (u *DoctorUsecase) GetDoctor(id string) (model.Doctor, error) {
+func (u *doctorUsecase) GetDoctor(ctx context.Context, id string) (model.Doctor, error) {
 	if strings.TrimSpace(id) == "" {
 		return model.Doctor{}, fmt.Errorf("id is required")
 	}
-	return u.repo.GetByID(id)
+	return u.repo.GetByID(ctx, id)
 }
 
-func (u *DoctorUsecase) ListDoctors() ([]model.Doctor, error) {
-	return u.repo.List()
+func (u *doctorUsecase) ListDoctors(ctx context.Context) ([]model.Doctor, error) {
+	return u.repo.List(ctx)
 }

@@ -4,16 +4,16 @@ import (
 	"errors"
 	"net/http"
 
-	"appointment-service/internal/model"
+	"appointment-service/internal/domain"
 	"appointment-service/internal/usecase"
 	"github.com/gin-gonic/gin"
 )
 
 type AppointmentHandler struct {
-	uc *usecase.AppointmentUsecase
+	uc usecase.AppointmentUseCase
 }
 
-func NewAppointmentHandler(uc *usecase.AppointmentUsecase) *AppointmentHandler {
+func NewAppointmentHandler(uc usecase.AppointmentUseCase) *AppointmentHandler {
 	return &AppointmentHandler{uc: uc}
 }
 
@@ -24,7 +24,7 @@ type createAppointmentRequest struct {
 }
 
 type updateStatusRequest struct {
-	Status model.Status `json:"status"`
+	Status domain.Status `json:"status"`
 }
 
 func (h *AppointmentHandler) RegisterRoutes(router *gin.Engine) {
@@ -84,15 +84,15 @@ func (h *AppointmentHandler) UpdateStatus(c *gin.Context) {
 
 func (h *AppointmentHandler) handleUsecaseError(c *gin.Context, err error) {
 	switch {
-	case errors.Is(err, usecase.ErrAppointmentNotFound):
+	case errors.Is(err, domain.ErrAppointmentNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-	case errors.Is(err, usecase.ErrDoctorNotFound):
+	case errors.Is(err, domain.ErrDoctorNotFound):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-	case errors.Is(err, usecase.ErrDependencyUnavailable):
+	case errors.Is(err, domain.ErrDependencyUnavailable):
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"error": "doctor service is unavailable, appointment operation cannot be completed",
 		})
-	case errors.Is(err, usecase.ErrInvalidStatus), errors.Is(err, usecase.ErrForbiddenStatusTransit):
+	case errors.Is(err, domain.ErrInvalidStatus), errors.Is(err, domain.ErrForbiddenStatusTransit):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

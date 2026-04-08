@@ -20,7 +20,7 @@ func Run() error {
 
 	repo := repository.NewAppointmentMemoryRepository()
 	doctorClient := client.NewDoctorHTTPClient(doctorServiceURL, time.Duration(timeoutMS)*time.Millisecond)
-	uc := usecase.NewAppointmentUsecase(repo, doctorClient)
+	uc := usecase.NewAppointmentUseCase(repo, doctorClient)
 	handler := httptransport.NewAppointmentHandler(uc)
 
 	router := gin.Default()

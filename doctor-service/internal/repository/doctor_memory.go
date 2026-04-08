@@ -1,18 +1,16 @@
 package repository
 
 import (
-	"fmt"
+	"context"
 	"sync"
 
 	"doctor-service/internal/model"
-	"doctor-service/internal/usecase"
 )
 
 type DoctorMemoryRepository struct {
-	mu       sync.RWMutex
-	items    map[string]model.Doctor
-	emails   map[string]string
-	sequence int
+	mu     sync.RWMutex
+	items  map[string]model.Doctor
+	emails map[string]string
 }
 
 func NewDoctorMemoryRepository() *DoctorMemoryRepository {
@@ -22,14 +20,7 @@ func NewDoctorMemoryRepository() *DoctorMemoryRepository {
 	}
 }
 
-func (r *DoctorMemoryRepository) NextID() string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.sequence++
-	return fmt.Sprintf("doctor-%d", r.sequence)
-}
-
-func (r *DoctorMemoryRepository) Create(doctor model.Doctor) (model.Doctor, error) {
+func (r *DoctorMemoryRepository) Create(ctx context.Context, doctor model.Doctor) (model.Doctor, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.items[doctor.ID] = doctor
@@ -37,17 +28,17 @@ func (r *DoctorMemoryRepository) Create(doctor model.Doctor) (model.Doctor, erro
 	return doctor, nil
 }
 
-func (r *DoctorMemoryRepository) GetByID(id string) (model.Doctor, error) {
+func (r *DoctorMemoryRepository) GetByID(ctx context.Context, id string) (model.Doctor, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	doctor, ok := r.items[id]
 	if !ok {
-		return model.Doctor{}, usecase.ErrDoctorNotFound
+		return model.Doctor{}, model.ErrDoctorNotFound
 	}
 	return doctor, nil
 }
 
-func (r *DoctorMemoryRepository) List() ([]model.Doctor, error) {
+func (r *DoctorMemoryRepository) List(ctx context.Context) ([]model.Doctor, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	result := make([]model.Doctor, 0, len(r.items))
@@ -57,7 +48,7 @@ func (r *DoctorMemoryRepository) List() ([]model.Doctor, error) {
 	return result, nil
 }
 
-func (r *DoctorMemoryRepository) ExistsByEmail(email string) (bool, error) {
+func (r *DoctorMemoryRepository) ExistsByEmail(ctx context.Context, email string) (bool, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	_, ok := r.emails[email]
