@@ -1,104 +1,106 @@
 package usecase
 
 import (
-	"appointment-service/internal/domain"
+	"context"
 	"fmt"
 	"log"
 	"strings"
 	"time"
+
+	"appointment-service/internal/model"
 )
 
 type AppointmentUseCase interface {
-	CreateAppointment(title, description, doctorID string) (domain.Appointment, error)
-	GetAppointment(id string) (domain.Appointment, error)
-	ListAppointments() ([]domain.Appointment, error)
-	UpdateStatus(id string, status domain.Status) (domain.Appointment, error)
+	CreateAppointment(ctx context.Context, title, description, doctorID string) (model.Appointment, error)
+	GetAppointment(ctx context.Context, id string) (model.Appointment, error)
+	ListAppointments(ctx context.Context) ([]model.Appointment, error)
+	UpdateStatus(ctx context.Context, id string, status model.Status) (model.Appointment, error)
 }
 
 type appointmentUseCase struct {
-	repo         domain.AppointmentRepository
-	doctorClient domain.DoctorClient
+	repo         model.AppointmentRepository
+	doctorClient model.DoctorClient
 }
 
-func NewAppointmentUseCase(repo domain.AppointmentRepository, doctorClient domain.DoctorClient) AppointmentUseCase {
+func NewAppointmentUseCase(repo model.AppointmentRepository, doctorClient model.DoctorClient) AppointmentUseCase {
 	return &appointmentUseCase{
 		repo:         repo,
 		doctorClient: doctorClient,
 	}
 }
 
-func (u *appointmentUseCase) CreateAppointment(title, description, doctorID string) (domain.Appointment, error) {
+func (u *appointmentUseCase) CreateAppointment(ctx context.Context, title, description, doctorID string) (model.Appointment, error) {
 	title = strings.TrimSpace(title)
 	description = strings.TrimSpace(description)
 	doctorID = strings.TrimSpace(doctorID)
 
 	if title == "" {
-		return domain.Appointment{}, fmt.Errorf("title is required")
+		return model.Appointment{}, fmt.Errorf("title is required")
 	}
 	if doctorID == "" {
-		return domain.Appointment{}, fmt.Errorf("doctor_id is required")
+		return model.Appointment{}, fmt.Errorf("doctor_id is required")
 	}
 
-	if err := u.ensureDoctorExists(doctorID); err != nil {
-		return domain.Appointment{}, err
+	if err := u.ensureDoctorExists(ctx, doctorID); err != nil {
+		return model.Appointment{}, err
 	}
 
 	now := time.Now().UTC()
-	appointment := domain.Appointment{
+	appointment := model.Appointment{
 		ID:          u.repo.NextID(),
 		Title:       title,
 		Description: description,
 		DoctorID:    doctorID,
-		Status:      domain.StatusNew,
+		Status:      model.StatusNew,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
 	return u.repo.Create(appointment)
 }
 
-func (u *appointmentUseCase) GetAppointment(id string) (domain.Appointment, error) {
+func (u *appointmentUseCase) GetAppointment(ctx context.Context, id string) (model.Appointment, error) {
 	if strings.TrimSpace(id) == "" {
-		return domain.Appointment{}, fmt.Errorf("id is required")
+		return model.Appointment{}, fmt.Errorf("id is required")
 	}
 	return u.repo.GetByID(id)
 }
 
-func (u *appointmentUseCase) ListAppointments() ([]domain.Appointment, error) {
+func (u *appointmentUseCase) ListAppointments(ctx context.Context) ([]model.Appointment, error) {
 	return u.repo.List()
 }
 
-func (u *appointmentUseCase) UpdateStatus(id string, status domain.Status) (domain.Appointment, error) {
+func (u *appointmentUseCase) UpdateStatus(ctx context.Context, id string, status model.Status) (model.Appointment, error) {
 	if strings.TrimSpace(id) == "" {
-		return domain.Appointment{}, fmt.Errorf("id is required")
+		return model.Appointment{}, fmt.Errorf("id is required")
 	}
 	if !status.IsValid() {
-		return domain.Appointment{}, domain.ErrInvalidStatus
+		return model.Appointment{}, model.ErrInvalidStatus
 	}
 
 	current, err := u.repo.GetByID(id)
 	if err != nil {
-		return domain.Appointment{}, err
+		return model.Appointment{}, err
 	}
 
-	if err := u.ensureDoctorExists(current.DoctorID); err != nil {
-		return domain.Appointment{}, err
+	if err := u.ensureDoctorExists(ctx, current.DoctorID); err != nil {
+		return model.Appointment{}, err
 	}
 
-	if current.Status == domain.StatusDone && status == domain.StatusNew {
-		return domain.Appointment{}, domain.ErrForbiddenStatusTransit
+	if current.Status == model.StatusDone && status == model.StatusNew {
+		return model.Appointment{}, model.ErrForbiddenStatusTransit
 	}
 
 	return u.repo.UpdateStatus(id, status, time.Now().UTC())
 }
 
-func (u *appointmentUseCase) ensureDoctorExists(doctorID string) error {
-	exists, err := u.doctorClient.DoctorExists(doctorID)
+func (u *appointmentUseCase) ensureDoctorExists(ctx context.Context, doctorID string) error {
+	exists, err := u.doctorClient.DoctorExists(ctx, doctorID)
 	if err != nil {
 		log.Printf("doctor validation failed: doctor_id=%s error=%v", doctorID, err)
-		return domain.ErrDependencyUnavailable
+		return model.ErrDependencyUnavailable
 	}
 	if !exists {
-		return domain.ErrDoctorNotFound
+		return model.ErrDoctorNotFound
 	}
 	return nil
 }

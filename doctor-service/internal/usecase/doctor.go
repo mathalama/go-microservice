@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"doctor-service/internal/model"
-	"github.com/google/uuid"
 )
 
 type DoctorRepository interface {
@@ -14,6 +13,7 @@ type DoctorRepository interface {
 	GetByID(ctx context.Context, id string) (model.Doctor, error)
 	List(ctx context.Context) ([]model.Doctor, error)
 	ExistsByEmail(ctx context.Context, email string) (bool, error)
+	NextID(ctx context.Context) string
 }
 
 type DoctorUsecase interface {
@@ -51,7 +51,7 @@ func (u *doctorUsecase) CreateDoctor(ctx context.Context, fullName, specializati
 	}
 
 	doctor := model.Doctor{
-		ID:             uuid.New().String(),
+		ID:             u.repo.NextID(ctx),
 		FullName:       fullName,
 		Specialization: specialization,
 		Email:          email,

@@ -2,31 +2,42 @@ package app
 
 import (
 	"fmt"
+	"net"
 	"os"
-	"strconv"
-	"time"
 
 	"appointment-service/internal/client"
 	"appointment-service/internal/repository"
-	httptransport "appointment-service/internal/transport/http"
+	grpctransport "appointment-service/internal/transport/grpc"
 	"appointment-service/internal/usecase"
-	"github.com/gin-gonic/gin"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/reflection"
 )
 
 func Run() error {
-	port := getEnv("APPOINTMENT_SERVICE_PORT", "8082")
-	doctorServiceURL := getEnv("DOCTOR_SERVICE_URL", "http://localhost:8081")
-	timeoutMS := getEnvInt("DOCTOR_SERVICE_TIMEOUT_MS", 2000)
+	port := getEnv("APPOINTMENT_SERVICE_PORT", "50052")
+	doctorServiceAddr := getEnv("DOCTOR_SERVICE_ADDR", "localhost:50051")
 
 	repo := repository.NewAppointmentMemoryRepository()
-	doctorClient := client.NewDoctorHTTPClient(doctorServiceURL, time.Duration(timeoutMS)*time.Millisecond)
+	conn, err := grpc.NewClient(doctorServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	doctorClient := client.NewDoctorGRPCClient(conn)
 	uc := usecase.NewAppointmentUseCase(repo, doctorClient)
-	handler := httptransport.NewAppointmentHandler(uc)
+	server := grpc.NewServer()
+	handler := grpctransport.NewAppointmentServer(uc)
+	handler.Register(server)
+	reflection.Register(server)
 
-	router := gin.Default()
-	handler.RegisterRoutes(router)
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", port))
+	if err != nil {
+		return err
+	}
 
-	return router.Run(fmt.Sprintf(":%s", port))
+	return server.Serve(lis)
 }
 
 func getEnv(key, fallback string) string {
@@ -34,16 +45,4 @@ func getEnv(key, fallback string) string {
 		return value
 	}
 	return fallback
-}
-
-func getEnvInt(key string, fallback int) int {
-	value := os.Getenv(key)
-	if value == "" {
-		return fallback
-	}
-	parsed, err := strconv.Atoi(value)
-	if err != nil || parsed <= 0 {
-		return fallback
-	}
-	return parsed
 }

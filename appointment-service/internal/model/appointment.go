@@ -1,6 +1,7 @@
-package domain
+package model
 
 import (
+	"context"
 	"errors"
 	"time"
 )
@@ -44,5 +45,5 @@ type AppointmentRepository interface {
 }
 
 type DoctorClient interface {
-	DoctorExists(doctorID string) (bool, error)
+	DoctorExists(ctx context.Context, doctorID string) (bool, error)
 }

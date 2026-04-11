@@ -5,18 +5,19 @@ import (
 	"sync"
 	"time"
 
-	"appointment-service/internal/domain"
+	"appointment-service/internal/model"
 )
 
 type AppointmentMemoryRepository struct {
 	mu       sync.RWMutex
-	items    map[string]domain.Appointment
+	items    map[string]model.Appointment
+	order    []string
 	sequence int
 }
 
 func NewAppointmentMemoryRepository() *AppointmentMemoryRepository {
 	return &AppointmentMemoryRepository{
-		items: make(map[string]domain.Appointment),
+		items: make(map[string]model.Appointment),
 	}
 }
 
@@ -27,39 +28,40 @@ func (r *AppointmentMemoryRepository) NextID() string {
 	return fmt.Sprintf("appointment-%d", r.sequence)
 }
 
-func (r *AppointmentMemoryRepository) Create(appointment domain.Appointment) (domain.Appointment, error) {
+func (r *AppointmentMemoryRepository) Create(appointment model.Appointment) (model.Appointment, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.items[appointment.ID] = appointment
+	r.order = append(r.order, appointment.ID)
 	return appointment, nil
 }
 
-func (r *AppointmentMemoryRepository) GetByID(id string) (domain.Appointment, error) {
+func (r *AppointmentMemoryRepository) GetByID(id string) (model.Appointment, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	appointment, ok := r.items[id]
 	if !ok {
-		return domain.Appointment{}, domain.ErrAppointmentNotFound
+		return model.Appointment{}, model.ErrAppointmentNotFound
 	}
 	return appointment, nil
 }
 
-func (r *AppointmentMemoryRepository) List() ([]domain.Appointment, error) {
+func (r *AppointmentMemoryRepository) List() ([]model.Appointment, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	result := make([]domain.Appointment, 0, len(r.items))
-	for _, appointment := range r.items {
-		result = append(result, appointment)
+	result := make([]model.Appointment, 0, len(r.order))
+	for _, id := range r.order {
+		result = append(result, r.items[id])
 	}
 	return result, nil
 }
 
-func (r *AppointmentMemoryRepository) UpdateStatus(id string, status domain.Status, updatedAt time.Time) (domain.Appointment, error) {
+func (r *AppointmentMemoryRepository) UpdateStatus(id string, status model.Status, updatedAt time.Time) (model.Appointment, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	appointment, ok := r.items[id]
 	if !ok {
-		return domain.Appointment{}, domain.ErrAppointmentNotFound
+		return model.Appointment{}, model.ErrAppointmentNotFound
 	}
 	appointment.Status = status
 	appointment.UpdatedAt = updatedAt

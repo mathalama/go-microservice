@@ -2,26 +2,33 @@ package app
 
 import (
 	"fmt"
+	"net"
 	"os"
 
 	"doctor-service/internal/repository"
-	httptransport "doctor-service/internal/transport/http"
+	grpctransport "doctor-service/internal/transport/grpc"
 	"doctor-service/internal/usecase"
-	"github.com/gin-gonic/gin"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
 )
 
 func Run() error {
 	port := os.Getenv("DOCTOR_SERVICE_PORT")
 	if port == "" {
-		port = "8081"
+		port = "50051"
 	}
 
 	repo := repository.NewDoctorMemoryRepository()
 	uc := usecase.NewDoctorUsecase(repo)
-	handler := httptransport.NewDoctorHandler(uc)
+	server := grpc.NewServer()
+	handler := grpctransport.NewDoctorServer(uc)
+	handler.Register(server)
+	reflection.Register(server)
 
-	router := gin.Default()
-	handler.RegisterRoutes(router)
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", port))
+	if err != nil {
+		return err
+	}
 
-	return router.Run(fmt.Sprintf(":%s", port))
+	return server.Serve(lis)
 }
