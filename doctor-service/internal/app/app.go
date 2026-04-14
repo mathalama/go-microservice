@@ -8,14 +8,16 @@ import (
 	"doctor-service/internal/repository"
 	grpctransport "doctor-service/internal/transport/grpc"
 	"doctor-service/internal/usecase"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
+	"log"
 )
 
 func Run() error {
 	port := os.Getenv("DOCTOR_SERVICE_PORT")
 	if port == "" {
-		port = "50051"
+		port = "8081"
 	}
 
 	repo := repository.NewDoctorMemoryRepository()
@@ -30,5 +32,6 @@ func Run() error {
 		return err
 	}
 
+	log.Printf("Doctor service started on port %s", port)
 	return server.Serve(lis)
 }
