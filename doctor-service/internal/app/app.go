@@ -17,7 +17,7 @@ import (
 func Run() error {
 	port := os.Getenv("DOCTOR_SERVICE_PORT")
 	if port == "" {
-		port = "8081"
+		port = "50051"
 	}
 
 	repo := repository.NewDoctorMemoryRepository()

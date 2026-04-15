@@ -10,15 +10,16 @@ import (
 	grpctransport "appointment-service/internal/transport/grpc"
 	"appointment-service/internal/usecase"
 
+	"log"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/reflection"
-	"log"
 )
 
 func Run() error {
-	port := getEnv("APPOINTMENT_SERVICE_PORT", "8080")
-	doctorServiceAddr := getEnv("DOCTOR_SERVICE_ADDR", "localhost:8081")
+	port := getEnv("APPOINTMENT_SERVICE_PORT", "50052")
+	doctorServiceAddr := getEnv("DOCTOR_SERVICE_ADDR", "localhost:50051")
 
 	repo := repository.NewAppointmentMemoryRepository()
 	conn, err := grpc.NewClient(doctorServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
