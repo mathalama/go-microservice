@@ -72,6 +72,6 @@ func mapDoctorError(err error) error {
 	case errors.Is(err, model.ErrEmailExists):
 		return status.Error(codes.AlreadyExists, err.Error())
 	default:
-		return status.Error(codes.InvalidArgument, err.Error())
+		return status.Error(codes.Internal, err.Error())
 	}
 }

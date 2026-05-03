@@ -1,270 +1,107 @@
-# AP2 Assignment 2: Medical Scheduling Platform over gRPC
+# Medical Scheduling Platform - Assignment 3
 
-## Project Overview
-This project migrates a two-service medical scheduling platform from REST to gRPC while preserving Clean Architecture and keeping business logic isolated from transport concerns.
+## Overview
+This version of the Medical Scheduling Platform introduces asynchronous event-driven communication using NATS and persistent storage using PostgreSQL. The system consists of three services:
+1. **Doctor Service**: Manages doctor information and publishes `doctors.created` events.
+2. **Appointment Service**: Manages appointments, validates doctors via gRPC, and publishes `appointments.created` and `appointments.status_updated` events.
+3. **Notification Service**: Subscribes to all domain events and logs them in a structured JSON format.
 
-Services:
-- `doctor-service`: owns doctor profiles
-- `appointment-service`: owns appointments and validates doctor existence by calling `doctor-service` over gRPC
+## Architecture
+![Architecture Diagram](architecture.png)
 
-Clean Architecture boundaries in both services:
-- `model` / `domain`: entities and business errors
-- `usecase`: application business rules
-- `repository`: in-memory persistence
-- `transport/grpc`: delivery layer only, responsible for proto mapping and gRPC status codes
-- `app`: dependency wiring and server startup
-
-## Repository Structure
-```text
-assignment1/
-├── doctor-service/
-│   ├── cmd/doctor-service/main.go
-│   ├── main.go
-│   ├── go.mod
-│   ├── internal/
-│   │   ├── app/
-│   │   ├── model/
-│   │   ├── repository/
-│   │   ├── transport/grpc/
-│   │   └── usecase/
-│   └── proto/
-│       ├── doctor.proto
-│       ├── doctor.pb.go
-│       └── doctor_grpc.pb.go
-├── appointment-service/
-│   ├── cmd/appointment-service/main.go
-│   ├── main.go
-│   ├── go.mod
-│   ├── internal/
-│   │   ├── app/
-│   │   ├── client/
-│   │   ├── model/
-│   │   ├── repository/
-│   │   ├── transport/grpc/
-│   │   └── usecase/
-│   └── proto/
-│       ├── appointment.proto
-│       ├── appointment.pb.go
-│       └── appointment_grpc.pb.go
-└── README.md
-```
-
-## gRPC Contracts
-- Doctor proto: `doctor-service/proto/doctor.proto`
-- Appointment proto: `appointment-service/proto/appointment.proto`
-
-Implemented RPCs:
-- `DoctorService.CreateDoctor`
-- `DoctorService.GetDoctor`
-- `DoctorService.ListDoctors`
-- `AppointmentService.CreateAppointment`
-- `AppointmentService.GetAppointment`
-- `AppointmentService.ListAppointments`
-- `AppointmentService.UpdateAppointmentStatus`
-
-## Architecture Diagram
 ```mermaid
-flowchart LR
-    Client["gRPC Client / grpcurl"] --> DS["doctor-service :50051"]
-    Client --> AS["appointment-service :50052"]
-    AS -->|gRPC GetDoctor| DS
-    DS --> DDB["Doctor in-memory repository"]
-    AS --> ADB["Appointment in-memory repository"]
+graph TD
+    User((User))
+    User -- gRPC --> AS[Appointment Service]
+    User -- gRPC --> DS[Doctor Service]
+    AS -- gRPC --> DS
+    AS -- Events --> NATS((NATS Broker))
+    DS -- Events --> NATS
+    NATS -- Events --> NS[Notification Service]
+    AS -- DB --> DBA[(Postgres: appointment_db)]
+    DS -- DB --> DBD[(Postgres: doctor_db)]
 ```
 
-## Architecture Decisions
-1. Only the transport layer was migrated from REST to gRPC.
-2. Use cases do not import protobuf-generated code.
-3. Proto ↔ domain mapping is done only inside `internal/transport/grpc`.
-4. `appointment-service` uses a dedicated gRPC client adapter hidden behind the `DoctorClient` interface.
-5. The appointment use case never constructs a gRPC client itself; it receives the abstraction via dependency injection.
-6. Server reflection is enabled in both services so `grpcurl` can be used as a testing artifact.
-7. Both services keep `main.go` at the service root, so each one still starts with `go run .`.
+## Broker Choice: NATS
+I chose **NATS (Core)** as the message broker for the following reasons:
+- **Simplicity**: NATS has a very lightweight setup and a simple Go client.
+- **Performance**: It provides high-throughput, low-latency messaging.
+- **Statelessness**: For the requirement of "stateless notifications" and "fire-and-forget" delivery, NATS Core is ideal.
+- **Ease of Use**: It doesn't require complex exchange/queue declarations like RabbitMQ for simple Pub/Sub.
 
-## Business Rules Implemented
-- `CreateDoctor`
-  - `full_name` is required
-  - `email` is required
-  - `email` must be unique
-- `GetDoctor`
-  - returns `NotFound` when the doctor ID does not exist
-- `CreateAppointment`
-  - `title` is required
-  - `doctor_id` is required
-  - calls `doctor-service` over gRPC before creating the appointment
-- `UpdateAppointmentStatus`
-  - valid statuses: `new`, `in_progress`, `done`
-  - `done -> new` transition is forbidden
-- `GetAppointment`
-  - returns `NotFound` when the appointment ID does not exist
+## Environment Variables
+Each service uses the following environment variables:
 
-## gRPC Error Handling Strategy
-The delivery layer converts domain/usecase errors into gRPC status codes.
+| Variable | Description | Default (Example) |
+| --- | --- | --- |
+| `DATABASE_URL` | PostgreSQL connection string | `postgres://user:password@localhost:5433/doctor_db?sslmode=disable` |
+| `NATS_URL` | NATS connection URL | `nats://localhost:4222` |
+| `DOCTOR_SERVICE_PORT` | Port for Doctor gRPC server | `50051` |
+| `APPOINTMENT_SERVICE_PORT` | Port for Appointment gRPC server | `50052` |
+| `DOCTOR_SERVICE_ADDR` | Address of Doctor service (for Appointment client) | `localhost:50051` |
 
-| Situation | gRPC code |
-|---|---|
-| Missing required field | `InvalidArgument` |
-| Email already exists | `AlreadyExists` |
-| Doctor not found in doctor-service | `NotFound` |
-| Doctor Service unreachable from appointment-service | `Unavailable` |
-| Doctor does not exist during remote validation | `FailedPrecondition` |
-| Invalid appointment status | `InvalidArgument` |
-| Forbidden `done -> new` transition | `InvalidArgument` |
-| Appointment not found | `NotFound` |
-
-Failure handling details:
-- `appointment-service` calls `DoctorService.GetDoctor`
-- if the call returns `NotFound`, the use case rejects creation/update with `FailedPrecondition`
-- if the call fails due to connection or transport issues, the use case rejects with `Unavailable`
-- no appointment is created or updated when doctor validation fails
-
-## How to Run Locally
-Open two terminals.
-
-1. Start `doctor-service` first:
+## Infrastructure Setup
+To start the required infrastructure (PostgreSQL and NATS), run:
 ```bash
-cd doctor-service
-go run .
+docker-compose up -d
 ```
 
-2. Start `appointment-service` second:
+## Migrations
+Migrations are handled automatically by each service on startup using `golang-migrate`.
+- **Doctor Service** migrations are in `doctor-service/migrations/`.
+- **Appointment Service** migrations are in `appointment-service/migrations/`.
+
+To roll back a migration manually (using `golang-migrate` CLI):
 ```bash
-cd appointment-service
-go run .
+migrate -path ./migrations -database "$DATABASE_URL" down
 ```
 
-Default ports:
-- `doctor-service`: `50051`
-- `appointment-service`: `50052`
+## Service Startup Order
+1. **Infrastructure**: Start NATS and PostgreSQL first.
+2. **Doctor Service**: `cd doctor-service && go run .`
+3. **Appointment Service**: `cd appointment-service && go run .`
+4. **Notification Service**: `cd notification-service && go run ./cmd/notification-service`
 
-Environment variables:
-- `DOCTOR_SERVICE_PORT` for `doctor-service` server port
-- `APPOINTMENT_SERVICE_PORT` for `appointment-service` server port
-- `DOCTOR_SERVICE_ADDR` for the remote doctor gRPC endpoint used by `appointment-service`
+## Event Contract
+| Subject | Trigger | Payload Fields |
+| --- | --- | --- |
+| `doctors.created` | New doctor created | `event_type`, `occurred_at`, `id`, `full_name`, `specialization`, `email` |
+| `appointments.created` | New appointment created | `event_type`, `occurred_at`, `id`, `title`, `doctor_id`, `status` |
+| `appointments.status_updated` | Status changed | `event_type`, `occurred_at`, `id`, `old_status`, `new_status` |
 
-Default `DOCTOR_SERVICE_ADDR`:
-```text
-localhost:50051
-```
+## Testing with grpcurl
 
-## Regenerating Proto Stubs
-Requirements:
-- `protoc`
-- `protoc-gen-go`
-- `protoc-gen-go-grpc`
-
-Install generators:
+### 1. Create a Doctor
 ```bash
-go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+grpcurl -plaintext -d '{"full_name": "Dr. Aisha Seitkali", "specialization": "Cardiology", "email": "a.seitkali@clinic.kz"}' localhost:50051 doctor.DoctorService/CreateDoctor
+```
+**Expected Notification Log:**
+```json
+{"time":"2026-05-01T10:23:44Z","subject":"doctors.created","event":{"event_type":"doctors.created","occurred_at":"2026-05-01T10:23:44Z","id":"...","full_name":"Dr. Aisha Seitkali","specialization":"Cardiology","email":"a.seitkali@clinic.kz"}}
 ```
 
-Generate doctor stubs into `doctor-service/proto`:
+### 2. Create an Appointment
 ```bash
-cd doctor-service
-protoc --proto_path=proto --go_out=proto --go_opt=paths=source_relative --go-grpc_out=proto --go-grpc_opt=paths=source_relative proto/doctor.proto
+grpcurl -plaintext -d '{"title": "Initial cardiac consultation", "doctor_id": "DOCTOR_ID_HERE"}' localhost:50052 appointment.AppointmentService/CreateAppointment
+```
+**Expected Notification Log:**
+```json
+{"time":"2026-05-01T10:24:01Z","subject":"appointments.created","event":{"event_type":"appointments.created","occurred_at":"2026-05-01T10:24:01Z","id":"...","title":"Initial cardiac consultation","doctor_id":"...","status":"new"}}
 ```
 
-Generate appointment stubs into `appointment-service/proto`:
+### 3. Update Appointment Status
 ```bash
-cd appointment-service
-protoc --proto_path=proto --go_out=proto --go_opt=paths=source_relative --go-grpc_out=proto --go-grpc_opt=paths=source_relative proto/appointment.proto
+grpcurl -plaintext -d '{"id": "APPOINTMENT_ID_HERE", "status": "in_progress"}' localhost:50052 appointment.AppointmentService/UpdateAppointmentStatus
+```
+**Expected Notification Log:**
+```json
+{"time":"2026-05-01T10:25:10Z","subject":"appointments.status_updated","event":{"event_type":"appointments.status_updated","occurred_at":"2026-05-01T10:25:10Z","id":"...","old_status":"new","new_status":"in_progress"}}
 ```
 
-After generation, ensure these files are present:
-- `doctor-service/proto/doctor.pb.go`
-- `doctor-service/proto/doctor_grpc.pb.go`
-- `appointment-service/proto/appointment.pb.go`
-- `appointment-service/proto/appointment_grpc.pb.go`
+## Consistency Trade-offs
+- **Best-Effort Delivery**: Publishing to NATS is fire-and-forget. If the broker is down during an RPC, the event is lost, but the gRPC response still succeeds.
+- **Reliability**: To improve reliability, the **Outbox Pattern** could be used, where events are stored in the same database transaction as the business data and then published by a background worker. Alternatively, NATS JetStream could provide durable streams and guaranteed delivery.
 
-## Testing Artifact: grpcurl Commands
-Because server reflection is enabled, the platform can be tested with `grpcurl`.
-
-List doctor RPCs:
-```bash
-grpcurl -plaintext localhost:50051 list
-```
-
-Create doctor:
-```bash
-grpcurl -plaintext -d '{"full_name":"Dr. Aisha Seitkali","specialization":"Cardiology","email":"a.seitkali@clinic.kz"}' localhost:50051 doctor.DoctorService/CreateDoctor
-```
-
-Get doctor:
-```bash
-grpcurl -plaintext -d '{"id":"doctor-1"}' localhost:50051 doctor.DoctorService/GetDoctor
-```
-
-List doctors:
-```bash
-grpcurl -plaintext -d '{}' localhost:50051 doctor.DoctorService/ListDoctors
-```
-
-Create appointment:
-```bash
-grpcurl -plaintext -d '{"title":"Initial cardiac consultation","description":"Patient referred","doctor_id":"doctor-1"}' localhost:50052 appointment.AppointmentService/CreateAppointment
-```
-
-Get appointment:
-```bash
-grpcurl -plaintext -d '{"id":"appointment-1"}' localhost:50052 appointment.AppointmentService/GetAppointment
-```
-
-List appointments:
-```bash
-grpcurl -plaintext -d '{}' localhost:50052 appointment.AppointmentService/ListAppointments
-```
-
-Update appointment status:
-```bash
-grpcurl -plaintext -d '{"id":"appointment-1","status":"in_progress"}' localhost:50052 appointment.AppointmentService/UpdateAppointmentStatus
-```
-
-Remote doctor validation failure:
-```bash
-grpcurl -plaintext -d '{"title":"Bad appointment","description":"Should fail","doctor_id":"doctor-404"}' localhost:50052 appointment.AppointmentService/CreateAppointment
-```
-
-Expected result:
-- gRPC `FailedPrecondition`
-
-Dependency unavailable failure:
-1. Stop `doctor-service`
-2. Call:
-```bash
-grpcurl -plaintext -d '{"title":"Follow-up","description":"Doctor service down","doctor_id":"doctor-1"}' localhost:50052 appointment.AppointmentService/CreateAppointment
-```
-
-Expected result:
-- gRPC `Unavailable`
-
-## REST vs gRPC Trade-offs
-1. Protocol and payload format
-   REST usually sends human-readable JSON over HTTP, which is easy to inspect manually.
-   gRPC uses HTTP/2 with compact binary Protocol Buffers payloads.
-   Choose REST when readability and public-web compatibility matter more; choose gRPC when service-to-service efficiency matters more.
-2. Contract definition
-   REST can work without a strict schema, and teams often rely on documentation or conventions.
-   gRPC requires a strict `.proto` contract, and both client and server are generated from that shared schema.
-   Choose REST when you want looser integration and quick experimentation; choose gRPC when you want stronger type safety and fewer contract mismatches.
-3. Performance
-   REST with JSON is usually larger on the wire and involves more text serialization overhead.
-   gRPC with protobuf is typically faster and lighter for internal microservice communication.
-   Choose REST when performance is not a bottleneck; choose gRPC when the platform has frequent internal RPC calls or tighter latency requirements.
-4. Streaming support
-   REST is mostly request-response unless you add extra patterns such as polling, SSE, or WebSockets.
-   gRPC has built-in support for unary, server-streaming, client-streaming, and bidirectional streaming RPCs.
-   Choose REST for simple CRUD APIs; choose gRPC when streaming or long-lived service communication is part of the design.
-5. Tooling and ecosystem
-   REST is easier to explore with browsers, Postman, and plain `curl`.
-   gRPC is stronger when you want generated clients, strict stubs, and typed internal integrations, with tools such as `grpcurl`.
-   Choose REST for public-facing APIs consumed by many different clients; choose gRPC for internal backend communication where generated tooling is a benefit.
-
-## Verification Performed
-- `go test ./...` passed in both services
-- both services started with `go run .`
-- verified with live gRPC calls:
-  - doctor creation succeeded
-  - appointment creation succeeded
-  - invalid remote doctor returned `FailedPrecondition`
-  - doctor-service downtime returned `Unavailable`
+## Broker Comparison
+- **NATS (Core)**: Lightweight, fire-and-forget Pub/Sub, no built-in persistence, extremely fast. Ideal for real-time notifications where occasional loss is acceptable.
+- **RabbitMQ**: Supports durable queues, acknowledgments, and complex routing logic. Better for systems requiring "At-least-once" delivery and task processing.

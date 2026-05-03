@@ -1,0 +1,10 @@
+graph TD
+    User((User))
+    User -- gRPC --> AS[Appointment Service]
+    User -- gRPC --> DS[Doctor Service]
+    AS -- gRPC --> DS
+    AS -- Events --> NATS((NATS Broker))
+    DS -- Events --> NATS
+    NATS -- Events --> NS[Notification Service]
+    AS -- DB --> DBA[(Postgres: appointment_db)]
+    DS -- DB --> DBD[(Postgres: doctor_db)]

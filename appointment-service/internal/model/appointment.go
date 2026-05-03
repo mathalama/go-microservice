@@ -37,11 +37,11 @@ type Appointment struct {
 }
 
 type AppointmentRepository interface {
-	Create(appointment Appointment) (Appointment, error)
-	GetByID(id string) (Appointment, error)
-	List() ([]Appointment, error)
-	UpdateStatus(id string, status Status, updatedAt time.Time) (Appointment, error)
-	NextID() string
+	Create(ctx context.Context, appointment Appointment) (Appointment, error)
+	GetByID(ctx context.Context, id string) (Appointment, error)
+	List(ctx context.Context) ([]Appointment, error)
+	UpdateStatus(ctx context.Context, id string, status Status, updatedAt time.Time) (Appointment, Status, error)
+	NextID(ctx context.Context) string
 }
 
 type DoctorClient interface {

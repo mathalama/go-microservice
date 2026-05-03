@@ -10,6 +10,10 @@ import (
 	"appointment-service/internal/model"
 )
 
+type EventPublisher interface {
+	Publish(ctx context.Context, subject string, event interface{}) error
+}
+
 type AppointmentUseCase interface {
 	CreateAppointment(ctx context.Context, title, description, doctorID string) (model.Appointment, error)
 	GetAppointment(ctx context.Context, id string) (model.Appointment, error)
@@ -20,12 +24,14 @@ type AppointmentUseCase interface {
 type appointmentUseCase struct {
 	repo         model.AppointmentRepository
 	doctorClient model.DoctorClient
+	publisher    EventPublisher
 }
 
-func NewAppointmentUseCase(repo model.AppointmentRepository, doctorClient model.DoctorClient) AppointmentUseCase {
+func NewAppointmentUseCase(repo model.AppointmentRepository, doctorClient model.DoctorClient, publisher EventPublisher) AppointmentUseCase {
 	return &appointmentUseCase{
 		repo:         repo,
 		doctorClient: doctorClient,
+		publisher:    publisher,
 	}
 }
 
@@ -47,7 +53,7 @@ func (u *appointmentUseCase) CreateAppointment(ctx context.Context, title, descr
 
 	now := time.Now().UTC()
 	appointment := model.Appointment{
-		ID:          u.repo.NextID(),
+		ID:          u.repo.NextID(ctx),
 		Title:       title,
 		Description: description,
 		DoctorID:    doctorID,
@@ -55,18 +61,36 @@ func (u *appointmentUseCase) CreateAppointment(ctx context.Context, title, descr
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	return u.repo.Create(appointment)
+	created, err := u.repo.Create(ctx, appointment)
+	if err != nil {
+		return model.Appointment{}, err
+	}
+
+	// Publish event
+	event := map[string]interface{}{
+		"event_type":  "appointments.created",
+		"occurred_at": time.Now().UTC().Format(time.RFC3339),
+		"id":          created.ID,
+		"title":       created.Title,
+		"doctor_id":   created.DoctorID,
+		"status":      string(created.Status),
+	}
+	if err := u.publisher.Publish(ctx, "appointments.created", event); err != nil {
+		log.Printf("failed to publish appointments.created event: %v", err)
+	}
+
+	return created, nil
 }
 
 func (u *appointmentUseCase) GetAppointment(ctx context.Context, id string) (model.Appointment, error) {
 	if strings.TrimSpace(id) == "" {
 		return model.Appointment{}, fmt.Errorf("id is required")
 	}
-	return u.repo.GetByID(id)
+	return u.repo.GetByID(ctx, id)
 }
 
 func (u *appointmentUseCase) ListAppointments(ctx context.Context) ([]model.Appointment, error) {
-	return u.repo.List()
+	return u.repo.List(ctx)
 }
 
 func (u *appointmentUseCase) UpdateStatus(ctx context.Context, id string, status model.Status) (model.Appointment, error) {
@@ -77,7 +101,10 @@ func (u *appointmentUseCase) UpdateStatus(ctx context.Context, id string, status
 		return model.Appointment{}, model.ErrInvalidStatus
 	}
 
-	current, err := u.repo.GetByID(id)
+	// We still need to fetch the appointment to check the doctor_id for the gRPC call.
+	// This "double read" (one here, one in UpdateStatus transaction) is a trade-off 
+	// to avoid holding a database lock during an external gRPC call.
+	current, err := u.repo.GetByID(ctx, id)
 	if err != nil {
 		return model.Appointment{}, err
 	}
@@ -86,11 +113,24 @@ func (u *appointmentUseCase) UpdateStatus(ctx context.Context, id string, status
 		return model.Appointment{}, err
 	}
 
-	if current.Status == model.StatusDone && status == model.StatusNew {
-		return model.Appointment{}, model.ErrForbiddenStatusTransit
+	updated, oldStatus, err := u.repo.UpdateStatus(ctx, id, status, time.Now().UTC())
+	if err != nil {
+		return model.Appointment{}, err
 	}
 
-	return u.repo.UpdateStatus(id, status, time.Now().UTC())
+	// Publish event
+	event := map[string]interface{}{
+		"event_type":  "appointments.status_updated",
+		"occurred_at": time.Now().UTC().Format(time.RFC3339),
+		"id":          updated.ID,
+		"old_status":  string(oldStatus),
+		"new_status":  string(updated.Status),
+	}
+	if err := u.publisher.Publish(ctx, "appointments.status_updated", event); err != nil {
+		log.Printf("failed to publish appointments.status_updated event: %v", err)
+	}
+
+	return updated, nil
 }
 
 func (u *appointmentUseCase) ensureDoctorExists(ctx context.Context, doctorID string) error {
