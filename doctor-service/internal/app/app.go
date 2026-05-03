@@ -16,6 +16,7 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"github.com/nats-io/nats.go"
 	"google.golang.org/grpc"
@@ -23,14 +24,17 @@ import (
 )
 
 func Run() error {
+	// Load .env file from service root
+	_ = godotenv.Load()
+
 	port := os.Getenv("DOCTOR_SERVICE_PORT")
 	if port == "" {
 		port = "50051"
 	}
 
-	dbURL := os.Getenv("DATABASE_URL")
+	dbURL := os.Getenv("DOCTOR_DATABASE_URL")
 	if dbURL == "" {
-		log.Fatal("DATABASE_URL environment variable is required")
+		log.Fatal("DOCTOR_DATABASE_URL environment variable is required")
 	}
 
 	// 1. Connect to Database
@@ -77,7 +81,7 @@ func Run() error {
 
 	repo := repository.NewPostgresRepository(db)
 	uc := usecase.NewDoctorUsecase(repo, publisher)
-	
+
 	server := grpc.NewServer()
 	handler := grpctransport.NewDoctorServer(uc)
 	handler.Register(server)

@@ -7,11 +7,16 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nats-io/nats.go"
 	"notification-service/internal/subscriber"
+
+	"github.com/joho/godotenv"
+	"github.com/nats-io/nats.go"
 )
 
 func main() {
+	// Load .env file
+	_ = godotenv.Load()
+
 	natsURL := os.Getenv("NATS_URL")
 	if natsURL == "" {
 		natsURL = nats.DefaultURL
@@ -41,7 +46,7 @@ func main() {
 	log.Printf("Connected to NATS at %s", natsURL)
 
 	subjects := []string{"doctors.created", "appointments.created", "appointments.status_updated"}
-	
+
 	sub := subscriber.NewSubscriber(nc)
 	if err := sub.SubscribeToAll(subjects); err != nil {
 		log.Fatalf("Subscription failed: %v", err)

@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   nats:
     image: nats:latest
@@ -10,8 +8,8 @@ services:
   postgres-doctor:
     image: postgres:15-alpine
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: doctor_db
     ports:
       - "5433:5432"
@@ -19,8 +17,8 @@ services:
   postgres-appointment:
     image: postgres:15-alpine
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: appointment_db
     ports:
       - "5434:5432"

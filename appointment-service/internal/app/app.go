@@ -17,6 +17,7 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"github.com/nats-io/nats.go"
 	"google.golang.org/grpc"
@@ -25,12 +26,15 @@ import (
 )
 
 func Run() error {
+	// Load .env file from service root
+	_ = godotenv.Load()
+
 	port := getEnv("APPOINTMENT_SERVICE_PORT", "50052")
 	doctorServiceAddr := getEnv("DOCTOR_SERVICE_ADDR", "localhost:50051")
 
-	dbURL := os.Getenv("DATABASE_URL")
+	dbURL := os.Getenv("APPOINTMENT_DATABASE_URL")
 	if dbURL == "" {
-		log.Fatal("DATABASE_URL environment variable is required")
+		log.Fatal("APPOINTMENT_DATABASE_URL environment variable is required")
 	}
 
 	// 1. Connect to Database
@@ -75,7 +79,7 @@ func Run() error {
 	}
 
 	repo := repository.NewPostgresRepository(db)
-	
+
 	conn, err := grpc.NewClient(doctorServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return err
@@ -84,7 +88,7 @@ func Run() error {
 
 	doctorClient := client.NewDoctorGRPCClient(conn)
 	uc := usecase.NewAppointmentUseCase(repo, doctorClient, publisher)
-	
+
 	server := grpc.NewServer()
 	handler := grpctransport.NewAppointmentServer(uc)
 	handler.Register(server)
