@@ -40,7 +40,7 @@ appointment-run:
 	cd $(APPOINTMENT_DIR) && $(GO) run ./cmd/appointment-service
 
 notification-run:
-	cd $(NOTIFICATION_DIR) && $(GO) run ./cmd/notification-service
+	cd $(NOTIFICATION_DIR) && $(GO) run ./cmd/notification-service | jq
 
 doctor-migrate-up:
 	docker run --rm --network host -v "$(PWD)/$(DOCTOR_DIR)/migrations:/migrations" $(MIGRATE_IMAGE) -path=/migrations -database "$(DOCTOR_DATABASE_URL)" up
