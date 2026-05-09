@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +24,12 @@ type EventPublisher interface {
 	Publish(ctx context.Context, subject string, event interface{}) error
 }
 
+type CacheRepository interface {
+	Get(ctx context.Context, key string, target interface{}) (bool, error)
+	Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error
+	Delete(ctx context.Context, key string) error
+}
+
 type DoctorUsecase interface {
 	CreateDoctor(ctx context.Context, fullName, specialization, email string) (model.Doctor, error)
 	GetDoctor(ctx context.Context, id string) (model.Doctor, error)
@@ -31,12 +39,22 @@ type DoctorUsecase interface {
 type doctorUsecase struct {
 	repo      DoctorRepository
 	publisher EventPublisher
+	cache     CacheRepository
+	cacheTTL  time.Duration
 }
 
-func NewDoctorUsecase(repo DoctorRepository, publisher EventPublisher) DoctorUsecase {
+func NewDoctorUsecase(repo DoctorRepository, publisher EventPublisher, cacheRepo CacheRepository) DoctorUsecase {
+	ttlStr := os.Getenv("CACHE_TTL_SECONDS")
+	ttlSec, err := strconv.Atoi(ttlStr)
+	if err != nil {
+		ttlSec = 60 // Default 60s
+	}
+
 	return &doctorUsecase{
 		repo:      repo,
 		publisher: publisher,
+		cache:     cacheRepo,
+		cacheTTL:  time.Duration(ttlSec) * time.Second,
 	}
 }
 
@@ -85,6 +103,11 @@ func (u *doctorUsecase) CreateDoctor(ctx context.Context, fullName, specializati
 		log.Printf("failed to publish doctor.created event: %v", err)
 	}
 
+	// Invalidate list cache (Write-Through strategy as per assignment table)
+	if err := u.cache.Delete(ctx, "doctors:list"); err != nil {
+		log.Printf("failed to invalidate doctors:list cache: %v", err)
+	}
+
 	return createdDoctor, nil
 }
 
@@ -92,9 +115,42 @@ func (u *doctorUsecase) GetDoctor(ctx context.Context, id string) (model.Doctor,
 	if strings.TrimSpace(id) == "" {
 		return model.Doctor{}, fmt.Errorf("id is required")
 	}
-	return u.repo.GetByID(ctx, id)
+
+	key := fmt.Sprintf("doctor:%s", id)
+	var doctor model.Doctor
+	found, err := u.cache.Get(ctx, key, &doctor)
+	if err == nil && found {
+		return doctor, nil
+	}
+
+	doctor, err = u.repo.GetByID(ctx, id)
+	if err != nil {
+		return model.Doctor{}, err
+	}
+
+	if err := u.cache.Set(ctx, key, doctor, u.cacheTTL); err != nil {
+		log.Printf("failed to set doctor cache for %s: %v", id, err)
+	}
+
+	return doctor, nil
 }
 
 func (u *doctorUsecase) ListDoctors(ctx context.Context) ([]model.Doctor, error) {
-	return u.repo.List(ctx)
+	key := "doctors:list"
+	var doctors []model.Doctor
+	found, err := u.cache.Get(ctx, key, &doctors)
+	if err == nil && found {
+		return doctors, nil
+	}
+
+	doctors, err = u.repo.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := u.cache.Set(ctx, key, doctors, u.cacheTTL); err != nil {
+		log.Printf("failed to set doctors:list cache: %v", err)
+	}
+
+	return doctors, nil
 }

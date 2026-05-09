@@ -5,55 +5,36 @@ export
 
 GO ?= go
 DOCKER_COMPOSE ?= docker compose
-MIGRATE_IMAGE ?= migrate/migrate:v4.19.1
 
-DOCTOR_DIR := doctor-service
-APPOINTMENT_DIR := appointment-service
-NOTIFICATION_DIR := notification-service
-
-.PHONY: help infra-up infra-down doctor-run appointment-run notification-run doctor-migrate-up doctor-migrate-down appointment-migrate-up appointment-migrate-down migrate-up migrate-down
+.PHONY: help up down doctor-run appointment-run notification-run mock-run migrate-up
 
 help:
 	@printf "%s\n" "Available targets:" \
-		"  infra-up               Start Postgres and NATS" \
-		"  infra-down             Stop infrastructure" \
-		"  doctor-run             Run Doctor Service" \
-		"  appointment-run        Run Appointment Service" \
-		"  notification-run       Run Notification Service" \
-		"  doctor-migrate-up      Apply Doctor migrations" \
-		"  doctor-migrate-down    Roll back one Doctor migration" \
-		"  appointment-migrate-up Apply Appointment migrations" \
-		"  appointment-migrate-down Roll back one Appointment migration" \
-		"  migrate-up             Apply both services' migrations" \
-		"  migrate-down           Roll back one migration in both services"
+		"  up                     Start infrastructure and all services" \
+		"  down                   Stop infrastructure" \
+		"  migrate-up             Run migrations for both services"
 
-infra-up:
+up:
 	$(DOCKER_COMPOSE) up -d
+	@echo "Waiting for DBs..."
+	@sleep 10
+	$(MAKE) -j 4 mock-run doctor-run appointment-run notification-run
 
-infra-down:
+down:
 	$(DOCKER_COMPOSE) down
 
 doctor-run:
-	cd $(DOCTOR_DIR) && $(GO) run ./cmd/doctor-service
+	cd doctor-service && $(GO) run ./cmd/doctor-service
 
 appointment-run:
-	cd $(APPOINTMENT_DIR) && $(GO) run ./cmd/appointment-service
+	cd appointment-service && $(GO) run ./cmd/appointment-service
 
 notification-run:
-	cd $(NOTIFICATION_DIR) && $(GO) run ./cmd/notification-service | jq
+	cd notification-service && $(GO) run ./cmd/notification-service
 
-doctor-migrate-up:
-	docker run --rm --network host -v "$(PWD)/$(DOCTOR_DIR)/migrations:/migrations" $(MIGRATE_IMAGE) -path=/migrations -database "$(DOCTOR_DATABASE_URL)" up
+mock-run:
+	cd mock-gateway && $(GO) run .
 
-doctor-migrate-down:
-	docker run --rm --network host -v "$(PWD)/$(DOCTOR_DIR)/migrations:/migrations" $(MIGRATE_IMAGE) -path=/migrations -database "$(DOCTOR_DATABASE_URL)" down 1
-
-appointment-migrate-up:
-	docker run --rm --network host -v "$(PWD)/$(APPOINTMENT_DIR)/migrations:/migrations" $(MIGRATE_IMAGE) -path=/migrations -database "$(APPOINTMENT_DATABASE_URL)" up
-
-appointment-migrate-down:
-	docker run --rm --network host -v "$(PWD)/$(APPOINTMENT_DIR)/migrations:/migrations" $(MIGRATE_IMAGE) -path=/migrations -database "$(APPOINTMENT_DATABASE_URL)" down 1
-
-migrate-up: doctor-migrate-up appointment-migrate-up
-
-migrate-down: doctor-migrate-down appointment-migrate-down
+migrate-up:
+	docker run --rm --network host -v "$(PWD)/doctor-service/migrations:/migrations" migrate/migrate:v4.19.1 -path=/migrations -database "$(DOCTOR_DATABASE_URL)" up
+	docker run --rm --network host -v "$(PWD)/appointment-service/migrations:/migrations" migrate/migrate:v4.19.1 -path=/migrations -database "$(APPOINTMENT_DATABASE_URL)" up

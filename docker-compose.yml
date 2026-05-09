@@ -2,23 +2,28 @@ services:
   nats:
     image: nats:latest
     ports:
-      - "4222:4222"
-      - "8222:8222"
+      - "${NATS_PORT1}:${NATS_PORT1}"
+      - "${NATS_PORT2}:${NATS_PORT2}"
 
   postgres-doctor:
     image: postgres:15-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: doctor_db
+      POSTGRES_DB: ${DOCTOR_POSTGRES_DB}
     ports:
-      - "5433:5432"
+      - "${DOCTOR_DB_PORT}:5432"
 
   postgres-appointment:
     image: postgres:15-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: appointment_db
+      POSTGRES_DB: ${APPOINTMENT_POSTGRES_DB}
     ports:
-      - "5434:5432"
+      - "${APPOINTMENT_DB_PORT}:5432"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT}:${REDIS_PORT}"

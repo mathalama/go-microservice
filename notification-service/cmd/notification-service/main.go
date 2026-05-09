@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"notification-service/internal/jobqueue"
+	"notification-service/internal/logger"
 	"notification-service/internal/subscriber"
 
 	"github.com/joho/godotenv"
@@ -45,9 +48,23 @@ func main() {
 
 	log.Printf("Connected to NATS at %s", natsURL)
 
+	// Redis connection for Job Queue
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		redisURL = "redis://localhost:6379"
+	}
+
+	queue, err := jobqueue.NewJobQueue(redisURL)
+	if err != nil {
+		log.Fatalf("Failed to initialize job queue: %v", err)
+	}
+	queue.Start(context.Background())
+	defer queue.Stop()
+
+	l := logger.NewLogger()
 	subjects := []string{"doctors.created", "appointments.created", "appointments.status_updated"}
 
-	sub := subscriber.NewSubscriber(nc)
+	sub := subscriber.NewSubscriber(nc, l, queue)
 	if err := sub.SubscribeToAll(subjects); err != nil {
 		log.Fatalf("Subscription failed: %v", err)
 	}

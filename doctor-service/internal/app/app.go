@@ -7,8 +7,11 @@ import (
 	"log"
 	"net"
 	"os"
+	"time"
 
+	"doctor-service/internal/cache"
 	"doctor-service/internal/event"
+	"doctor-service/internal/middleware"
 	"doctor-service/internal/repository"
 	grpctransport "doctor-service/internal/transport/grpc"
 	"doctor-service/internal/usecase"
@@ -19,6 +22,7 @@ import (
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"github.com/nats-io/nats.go"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 )
@@ -80,9 +84,37 @@ func Run() error {
 	}
 
 	repo := repository.NewPostgresRepository(db)
-	uc := usecase.NewDoctorUsecase(repo, publisher)
 
-	server := grpc.NewServer()
+	// 4. Connect to Redis
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		redisURL = "redis://localhost:6379"
+	}
+	
+	var cacheRepo usecase.CacheRepository
+	var redisClient *redis.Client
+
+	redisCache, err := cache.NewRedisCache(redisURL)
+	if err != nil {
+		log.Printf("WARNING: failed to connect to Redis: %v. Caching will be disabled.", err)
+		cacheRepo = &noopCache{}
+	} else {
+		cacheRepo = redisCache
+		// We need the client for the rate limiter too
+		opts, _ := redis.ParseURL(redisURL)
+		redisClient = redis.NewClient(opts)
+	}
+
+	uc := usecase.NewDoctorUsecase(repo, publisher, cacheRepo)
+
+	// 5. Rate Limiter
+	var interceptors []grpc.UnaryServerInterceptor
+	if redisClient != nil {
+		limiter := middleware.NewRateLimiter(redisClient)
+		interceptors = append(interceptors, limiter.UnaryInterceptor())
+	}
+
+	server := grpc.NewServer(grpc.ChainUnaryInterceptor(interceptors...))
 	handler := grpctransport.NewDoctorServer(uc)
 	handler.Register(server)
 	reflection.Register(server)
@@ -100,5 +132,19 @@ type noopPublisher struct{}
 
 func (p *noopPublisher) Publish(ctx context.Context, subject string, event interface{}) error {
 	log.Printf("NATS unavailable, skipping publish to %s", subject)
+	return nil
+}
+
+type noopCache struct{}
+
+func (c *noopCache) Get(ctx context.Context, key string, target interface{}) (bool, error) {
+	return false, nil
+}
+
+func (c *noopCache) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
+	return nil
+}
+
+func (c *noopCache) Delete(ctx context.Context, key string) error {
 	return nil
 }
